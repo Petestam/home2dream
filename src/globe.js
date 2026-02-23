@@ -1,5 +1,4 @@
-// Globe.GL loaded via CDN - use global
-const Globe = window.Globe;
+import Globe from 'globe.gl';
 
 const ROCKET_BLUE = '#81acff';
 const ROCKET_RED = '#de3341';
@@ -33,7 +32,6 @@ export function easeInOutCubic(t) {
 export { CHASE_CYCLE_MS };
 
 export function createGlobe(container) {
-  if (!Globe) throw new Error('Globe.GL not loaded - ensure script tag is present');
   const globe = new Globe(container, { animateIn: false })
     .globeImageUrl('//cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg')
     .arcsData([])

@@ -20,7 +20,8 @@ function isValidCoord(val) {
 }
 
 export async function loadJourneys() {
-  const res = await fetch('/SBX26_Metrics - 2_7.csv');
+  const base = import.meta.env.BASE_URL || '/';
+  const res = await fetch(`${base}SBX26_Metrics - 2_7.csv`);
   const text = await res.text();
   const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
   const rows = parsed.data;
