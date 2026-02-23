@@ -7,11 +7,12 @@ import {
   fitArcInView,
   fitArcsInView,
   easeInOutCubic,
-  CHASE_CYCLE_MS,
 } from './globe.js';
 
 const IDLE_MS = 30000;
 const JOURNEY_CYCLE_MS = 8000;
+const BUILD_DURATION_MS = 20000;
+const BUILD_BATCH_COUNT = 50;
 
 const SORT_OPTIONS = {
   'date-desc': (a, b) => new Date(b.scoreCreatedOn) - new Date(a.scoreCreatedOn),
@@ -79,6 +80,7 @@ async function init() {
   const infoDetailEl = document.getElementById('infoDetail');
   const infoDistanceEl = document.getElementById('infoDistance');
   const infoRouteEl = document.getElementById('infoRoute');
+  const playBtn = document.getElementById('playBtn');
 
   let allJourneys = [];
   let filteredJourneys = [];
@@ -96,11 +98,16 @@ async function init() {
   let explorationIdleTimer = null;
   let explorationCycleTimer = null;
   let lastArcsData = [];
-  let chaseRafId = null;
-  let chaseStartTime = 0;
+
+  let isPlayback = false;
+  let playbackRafId = null;
+  let playbackStartTime = 0;
+  let playbackList = [];
+  let playbackLastBatch = -1;
 
   function onUserActivity() {
     if (isExploring) stopExploration();
+    if (isPlayback) stopPlayback();
     if (explorationIdleTimer) clearTimeout(explorationIdleTimer);
     explorationIdleTimer = setTimeout(startExploration, IDLE_MS);
   }
@@ -140,6 +147,77 @@ async function init() {
     updateUI(true);
   }
 
+  function startPlayback() {
+    const list = getSortedFiltered();
+    if (list.length === 0) return;
+    if (isExploring) stopExploration();
+    if (explorationIdleTimer) clearTimeout(explorationIdleTimer);
+    explorationIdleTimer = null;
+    filteredJourneys = list;
+    isPlayback = true;
+    playbackList = [...list].sort(
+      (a, b) => new Date(a.scoreCreatedOn) - new Date(b.scoreCreatedOn)
+    );
+    const arcs = playbackList.map((j, i) => ({
+      ...journeyToArc(j, 'base'),
+      __revealed: false,
+      __sortIndex: i,
+    }));
+    lastArcsData = arcs;
+    globe.arcsData(arcs);
+    globe.pointsData([]);
+    journeyListEl.parentElement?.classList.add('playback-building');
+    resultCountEl.textContent = `Building: 0 of ${arcs.length}`;
+    playBtn.classList.add('playing');
+    playBtn.querySelector('.play-label').textContent = 'Pause';
+    playBtn.querySelector('.play-icon').textContent = '❚❚';
+    playbackStartTime = performance.now();
+    tickPlayback();
+  }
+
+  function tickPlayback() {
+    if (!isPlayback || playbackList.length === 0) return;
+    const elapsed = performance.now() - playbackStartTime;
+    const rawT = Math.min(1, elapsed / BUILD_DURATION_MS);
+    const easedT = easeInOutCubic(rawT);
+    const total = lastArcsData.length;
+    const targetReveal = Math.floor(easedT * total);
+    const batchSize = Math.max(1, Math.ceil(total / BUILD_BATCH_COUNT));
+    const currentBatch = Math.floor(targetReveal / batchSize);
+    if (currentBatch > playbackLastBatch || rawT >= 1) {
+      playbackLastBatch = currentBatch;
+      const revealUpTo = rawT >= 1 ? total : Math.min(total, (currentBatch + 1) * batchSize);
+      for (let i = 0; i < total; i++) lastArcsData[i].__revealed = i < revealUpTo;
+      globe.arcsData(lastArcsData);
+    }
+    const count = Math.min(targetReveal, total);
+    infoSummaryEl.textContent = `${count} of ${total} journeys · Building...`;
+    resultCountEl.textContent = `Building: ${count} of ${total}`;
+    if (rawT >= 1) {
+      stopPlayback();
+      return;
+    }
+    playbackRafId = requestAnimationFrame(tickPlayback);
+  }
+
+  function stopPlayback() {
+    isPlayback = false;
+    playbackLastBatch = -1;
+    if (playbackRafId) {
+      cancelAnimationFrame(playbackRafId);
+      playbackRafId = null;
+    }
+    playbackList = [];
+    journeyListEl.parentElement?.classList.remove('playback-building');
+    playBtn.classList.remove('playing');
+    playBtn.querySelector('.play-label').textContent = 'Play';
+    playBtn.querySelector('.play-icon').textContent = '▶';
+    selectedIndices.clear();
+    lastClickedIndex = null;
+    filteredJourneys = getSortedFiltered();
+    updateUI(true, { skipFit: true });
+  }
+
   function getSelectedDays() {
     const active = dayFiltersEl?.querySelectorAll('.day-pill.active') || [];
     if (active.length === 0) return null;
@@ -162,16 +240,14 @@ async function init() {
     return list;
   }
 
-  function updateUI(fitToExtents = false, { skipFit = false } = {}) {
-    filteredJourneys = getSortedFiltered();
+  function updateUI(fitToExtents = false, { skipFit = false, playbackMode = false } = {}) {
+    if (!playbackMode) filteredJourneys = getSortedFiltered();
     const total = allJourneys.length;
     const count = filteredJourneys.length;
 
     resultCountEl.textContent = count === total ? `Showing ${count} journeys` : `Showing ${count} of ${total}`;
 
     if (count === 0) {
-      if (chaseRafId) cancelAnimationFrame(chaseRafId);
-      chaseRafId = null;
       lastArcsData = [];
       journeyListEl.classList.add('hidden');
       emptyStateEl.classList.remove('hidden');
@@ -205,28 +281,6 @@ async function init() {
     lastArcsData = arcsData;
     globe.arcsData(arcsData);
 
-    if (chaseRafId) cancelAnimationFrame(chaseRafId);
-    chaseRafId = null;
-    if (hasSelection && arcsData.some((a) => a.arcState === 'selected')) {
-      chaseStartTime = performance.now();
-      function tick() {
-        const selected = lastArcsData.filter((a) => a.arcState === 'selected');
-        if (selected.length === 0) {
-          chaseRafId = null;
-          return;
-        }
-        const elapsed = performance.now() - chaseStartTime;
-        const rawT = (elapsed / CHASE_CYCLE_MS) % 1;
-        const phase = easeInOutCubic(rawT);
-        selected.forEach((a) => {
-          a.__dashPhase = phase;
-        });
-        globe.arcsData([...lastArcsData]);
-        chaseRafId = requestAnimationFrame(tick);
-      }
-      chaseRafId = requestAnimationFrame(tick);
-    }
-
     const selectedJourneys = hasSelection
       ? [...selectedIndices].map((i) => filteredJourneys[i]).filter(Boolean)
       : [];
@@ -245,16 +299,25 @@ async function init() {
         const routes = selectedJourneys.map((j) => `${j.city} → ${j.dreamHomeName}`);
         infoRouteEl.textContent = routes.length <= 3 ? routes.join(' · ') : `${routes.length} routes`;
       }
-      if (selectedJourneys.length === 1) {
-        fitArcInView(globe, selectedJourneys[0]);
-      } else {
-        fitArcsInView(globe, selectedJourneys);
+      if (!playbackMode) {
+        if (selectedJourneys.length === 1) {
+          fitArcInView(globe, selectedJourneys[0]);
+        } else {
+          fitArcsInView(globe, selectedJourneys);
+        }
       }
     } else {
       infoSummaryEl.classList.remove('hidden');
       infoDetailEl.classList.add('hidden');
-      const avgMi = Math.round(filteredJourneys.reduce((s, j) => s + j.distance, 0) / count);
-      infoSummaryEl.textContent = `${count} journeys · Avg ${avgMi.toLocaleString()} mi · Click to focus, Shift/Ctrl for multi-select`;
+      if (playbackMode && playbackList.length > 0) {
+        const total = playbackList.length;
+        const avgMi =
+          count > 0 ? Math.round(filteredJourneys.reduce((s, j) => s + j.distance, 0) / count) : 0;
+        infoSummaryEl.textContent = `${count} of ${total} journeys · Building...`;
+      } else {
+        const avgMi = Math.round(filteredJourneys.reduce((s, j) => s + j.distance, 0) / count);
+        infoSummaryEl.textContent = `${count} journeys · Avg ${avgMi.toLocaleString()} mi · Click to focus, Shift/Ctrl for multi-select`;
+      }
       if (fitToExtents && !skipFit) fitArcsInView(globe, filteredJourneys);
     }
 
@@ -330,6 +393,15 @@ async function init() {
       selectedIndices.clear();
       lastClickedIndex = null;
       updateUI();
+    }
+  });
+
+  playBtn?.addEventListener('click', () => {
+    if (isPlayback) {
+      stopPlayback();
+      onUserActivity();
+    } else {
+      startPlayback();
     }
   });
 

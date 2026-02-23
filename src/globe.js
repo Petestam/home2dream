@@ -19,17 +19,10 @@ const ARC_COLORS = {
   dimmed: [DIMMED_BLUE, DIMMED_RED],
 };
 
-// Chase: path highlighted (long dash), slight moving element (short gap), one-way hometown→dream home
-const CHASE_DASH_LENGTH = 0.92;
-const CHASE_DASH_GAP = 0.08;
-const CHASE_CYCLE_MS = 18000;
-
 /** easeInOutCubic – slow at ends, smooth through middle */
 export function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
-
-export { CHASE_CYCLE_MS };
 
 export function createGlobe(container) {
   const globe = new Globe(container, { animateIn: false })
@@ -40,11 +33,12 @@ export function createGlobe(container) {
     .arcEndLat((d) => d.endLat)
     .arcEndLng((d) => d.endLng)
     .arcAltitude((d) => (d.arcState === 'selected' ? 0.18 : 0.1))
-    .arcColor((d) => ARC_COLORS[d.arcState] || ARC_COLORS.base)
-    .arcDashLength((d) => (d.arcState === 'selected' ? CHASE_DASH_LENGTH : 1))
-    .arcDashGap((d) => (d.arcState === 'selected' ? CHASE_DASH_GAP : 0))
-    .arcDashInitialGap((d) => (d.arcState === 'selected' ? (d.__dashPhase ?? 0) : 0))
-    .arcDashAnimateTime((d) => (d.arcState === 'selected' ? 0 : 0))
+    .arcColor((d) =>
+      d.__revealed === false ? 'rgba(0,0,0,0)' : (ARC_COLORS[d.arcState] || ARC_COLORS.base)
+    )
+    .arcDashLength(1)
+    .arcDashGap(0)
+    .arcDashAnimateTime(0)
     .arcStroke((d) => {
       if (d.arcState === 'selected') return 0.15;
       if (d.arcState === 'dimmed') return 0.08;

@@ -155,6 +155,41 @@ html, body {
   color: white;
 }
 
+.playback-wrap {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.play-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rocket-white);
+  background: var(--rocket-red);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.play-btn:hover {
+  background: var(--rocket-dark);
+}
+
+.play-btn.playing {
+  background: var(--rocket-blue-dark);
+}
+
+.play-btn .play-icon {
+  font-size: 0.65rem;
+}
+
 .accordion {
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
@@ -274,6 +309,11 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.journey-list-scroll.playback-building {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .journey-list-scroll::before {
