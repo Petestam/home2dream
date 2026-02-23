@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rocket · Home2Dream Explorer | Super Bowl LX Fan Experience</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.35.0/dist/globe.gl.min.js"></script>
+    <div id="app">
+      <header class="header">
+        <div class="header-brand">
+          <img src="https://media.ffycdn.net/us/quicken-loans/462wrEqvJBMrgi339Rqp.svg?width=120" alt="Rocket" class="header-logo" />
+          <span class="header-divider">|</span>
+          <h1>Home2Dream Explorer</h1>
+          <span class="header-badge">Super Bowl LX Fan Experience</span>
+        </div>
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="sidebar-controls">
+            <div class="day-pills" id="dayFilters">
+              <button type="button" class="day-pill active" data-day="3">Feb 3</button>
+              <button type="button" class="day-pill active" data-day="4">Feb 4</button>
+              <button type="button" class="day-pill active" data-day="5">Feb 5</button>
+              <button type="button" class="day-pill active" data-day="6">Feb 6</button>
+              <button type="button" class="day-pill active" data-day="7">Feb 7</button>
+            </div>
+            <div class="accordion">
+              <button type="button" class="accordion-trigger" id="accordionTrigger" aria-expanded="false">
+                <span>Search & sort</span>
+                <svg class="accordion-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l4 4 4-4"/></svg>
+              </button>
+              <div class="accordion-content" id="accordionContent">
+                <div class="search-wrap">
+                  <input type="search" id="search" class="search-input" placeholder="Search name or email..." autocomplete="off" />
+                </div>
+                <div class="sort-wrap">
+                  <label for="sort">Sort:</label>
+                  <select id="sort" class="sort-select">
+                    <option value="date-desc">Date (newest first)</option>
+                    <option value="date-asc">Date (oldest first)</option>
+                    <option value="distance-asc">Distance (shortest first)</option>
+                    <option value="distance-desc">Distance (longest first)</option>
+                  </select>
+                </div>
+                <label class="toggle-wrap">
+                  <input type="checkbox" id="showAll" checked />
+                  <span>Show all</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div id="resultCount" class="result-count">Loading...</div>
+          <div class="journey-list-scroll">
+            <div id="journeyList" class="journey-list"></div>
+            <div id="emptyState" class="empty-state hidden">
+              <p>No journeys match "<span id="emptySearchTerm"></span>"</p>
+              <button id="clearSearch" class="btn-clear">Clear search to show all journeys</button>
+            </div>
+          </div>
+        </aside>
+        <main class="main">
+          <div id="globeViz" class="globe-container"></div>
+          <div class="watermarks">
+            <a href="https://nohotashes.xyz" target="_blank" rel="noopener noreferrer">nohotashes.xyz</a>
+            <a href="https://supper.works" target="_blank" rel="noopener noreferrer">supper.works</a>
+          </div>
+          <div id="infoPanel" class="info-panel">
+            <p id="infoSummary" class="info-summary">762 journeys · Click one to focus</p>
+            <div id="infoDetail" class="info-detail hidden">
+              <p class="info-distance"><span id="infoDistance"></span></p>
+              <p class="info-route"><span id="infoRoute"></span></p>
+              <p class="info-label">(hometown → dream home)</p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
