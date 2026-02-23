@@ -1,5 +1,17 @@
 import { loadJourneys } from './csvLoader.js';
-import { createGlobe, journeyToArc, journeyToPoints, journeysToPoints, fitArcInView, fitArcsInView } from './globe.js';
+import {
+  createGlobe,
+  journeyToArc,
+  journeyToPoints,
+  journeysToPoints,
+  fitArcInView,
+  fitArcsInView,
+  easeInOutCubic,
+  CHASE_CYCLE_MS,
+} from './globe.js';
+
+const IDLE_MS = 30000;
+const JOURNEY_CYCLE_MS = 8000;
 
 const SORT_OPTIONS = {
   'date-desc': (a, b) => new Date(b.scoreCreatedOn) - new Date(a.scoreCreatedOn),
@@ -75,12 +87,58 @@ async function init() {
   let showAll = true;
 
   const globeContainer = document.getElementById('globeViz');
-  globeContainer.innerHTML = '<div class="loading">Loading journeys...</div>';
   const journeys = await loadJourneys();
   allJourneys = journeys;
-  globeContainer.innerHTML = '';
 
   const globe = createGlobe(globeContainer);
+
+  let isExploring = false;
+  let explorationIdleTimer = null;
+  let explorationCycleTimer = null;
+  let lastArcsData = [];
+  let chaseRafId = null;
+  let chaseStartTime = 0;
+
+  function onUserActivity() {
+    if (isExploring) stopExploration();
+    if (explorationIdleTimer) clearTimeout(explorationIdleTimer);
+    explorationIdleTimer = setTimeout(startExploration, IDLE_MS);
+  }
+
+  function startExploration() {
+    if (filteredJourneys.length === 0) return;
+    if (selectedIndices.size > 0) return;
+    if (explorationIdleTimer) clearTimeout(explorationIdleTimer);
+    explorationIdleTimer = null;
+    if (explorationCycleTimer) {
+      clearTimeout(explorationCycleTimer);
+      explorationCycleTimer = null;
+    }
+    isExploring = true;
+    const controls = globe.controls?.();
+    if (controls) controls.autoRotate = false;
+    cycleExplorationJourney();
+  }
+
+  function cycleExplorationJourney() {
+    if (!isExploring || filteredJourneys.length === 0) return;
+    const idx = Math.floor(Math.random() * filteredJourneys.length);
+    selectedIndices = new Set([idx]);
+    lastClickedIndex = idx;
+    updateUI();
+    explorationCycleTimer = setTimeout(cycleExplorationJourney, JOURNEY_CYCLE_MS);
+  }
+
+  function stopExploration() {
+    isExploring = false;
+    if (explorationCycleTimer) {
+      clearTimeout(explorationCycleTimer);
+      explorationCycleTimer = null;
+    }
+    selectedIndices.clear();
+    lastClickedIndex = null;
+    updateUI(true);
+  }
 
   function getSelectedDays() {
     const active = dayFiltersEl?.querySelectorAll('.day-pill.active') || [];
@@ -104,7 +162,7 @@ async function init() {
     return list;
   }
 
-  function updateUI() {
+  function updateUI(fitToExtents = false, { skipFit = false } = {}) {
     filteredJourneys = getSortedFiltered();
     const total = allJourneys.length;
     const count = filteredJourneys.length;
@@ -112,6 +170,9 @@ async function init() {
     resultCountEl.textContent = count === total ? `Showing ${count} journeys` : `Showing ${count} of ${total}`;
 
     if (count === 0) {
+      if (chaseRafId) cancelAnimationFrame(chaseRafId);
+      chaseRafId = null;
+      lastArcsData = [];
       journeyListEl.classList.add('hidden');
       emptyStateEl.classList.remove('hidden');
       emptySearchTermEl.textContent = searchEl.value.trim();
@@ -120,6 +181,8 @@ async function init() {
       infoSummaryEl.classList.remove('hidden');
       infoDetailEl.classList.add('hidden');
       infoSummaryEl.textContent = 'No journeys match your search';
+      const ctrl = globe.controls?.();
+      if (ctrl) ctrl.autoRotate = false;
       return;
     }
 
@@ -127,7 +190,7 @@ async function init() {
     emptyStateEl.classList.add('hidden');
 
     const hasSelection = selectedIndices.size > 0;
-    const arcsData = showAll
+    let arcsData = showAll
       ? filteredJourneys.map((j, i) =>
           journeyToArc(j, hasSelection ? (selectedIndices.has(i) ? 'selected' : 'dimmed') : 'base')
         )
@@ -135,7 +198,34 @@ async function init() {
           .filter((i) => i < filteredJourneys.length)
           .map((i) => journeyToArc(filteredJourneys[i], 'selected'));
 
+    if (hasSelection) {
+      arcsData = [...arcsData].sort((a, b) => (a.arcState === 'selected' ? 1 : 0) - (b.arcState === 'selected' ? 1 : 0));
+    }
+
+    lastArcsData = arcsData;
     globe.arcsData(arcsData);
+
+    if (chaseRafId) cancelAnimationFrame(chaseRafId);
+    chaseRafId = null;
+    if (hasSelection && arcsData.some((a) => a.arcState === 'selected')) {
+      chaseStartTime = performance.now();
+      function tick() {
+        const selected = lastArcsData.filter((a) => a.arcState === 'selected');
+        if (selected.length === 0) {
+          chaseRafId = null;
+          return;
+        }
+        const elapsed = performance.now() - chaseStartTime;
+        const rawT = (elapsed / CHASE_CYCLE_MS) % 1;
+        const phase = easeInOutCubic(rawT);
+        selected.forEach((a) => {
+          a.__dashPhase = phase;
+        });
+        globe.arcsData([...lastArcsData]);
+        chaseRafId = requestAnimationFrame(tick);
+      }
+      chaseRafId = requestAnimationFrame(tick);
+    }
 
     const selectedJourneys = hasSelection
       ? [...selectedIndices].map((i) => filteredJourneys[i]).filter(Boolean)
@@ -165,7 +255,11 @@ async function init() {
       infoDetailEl.classList.add('hidden');
       const avgMi = Math.round(filteredJourneys.reduce((s, j) => s + j.distance, 0) / count);
       infoSummaryEl.textContent = `${count} journeys · Avg ${avgMi.toLocaleString()} mi · Click to focus, Shift/Ctrl for multi-select`;
+      if (fitToExtents && !skipFit) fitArcsInView(globe, filteredJourneys);
     }
+
+    const controls = globe.controls?.();
+    if (controls) controls.autoRotate = false;
 
     journeyListEl.innerHTML = '';
     filteredJourneys.forEach((j, i) => {
@@ -242,14 +336,30 @@ async function init() {
   const accordionTrigger = document.getElementById('accordionTrigger');
   const accordionContent = document.getElementById('accordionContent');
   accordionTrigger?.addEventListener('click', () => {
+    onUserActivity();
     const open = accordionContent.classList.toggle('open');
     accordionTrigger.setAttribute('aria-expanded', open);
     accordionTrigger.classList.toggle('open', open);
   });
 
-  updateUI();
+  const activityEvents = ['mousedown', 'keydown', 'wheel', 'touchstart'];
+  activityEvents.forEach((ev) => document.addEventListener(ev, onUserActivity));
+  let lastMoveActivity = 0;
+  document.addEventListener('mousemove', () => {
+    const now = Date.now();
+    if (now - lastMoveActivity > 2000) {
+      lastMoveActivity = now;
+      onUserActivity();
+    }
+  });
+
+  updateUI(true, { skipFit: true });
+
+  explorationIdleTimer = setTimeout(startExploration, IDLE_MS);
 }
 
 init().catch((err) => {
-  document.getElementById('globeViz').innerHTML = `<div class="loading error">Failed to load: ${err.message}</div>`;
+  const el = document.getElementById('globeViz');
+  el.classList.remove('preload');
+  el.innerHTML = `<div class="loading error">Failed to load: ${err.message}</div>`;
 });
