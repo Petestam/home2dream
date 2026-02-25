@@ -7,12 +7,14 @@ import {
   fitArcInView,
   fitArcsInView,
   easeInOutCubic,
+  setArcsAboveMarkers,
 } from './globe.js';
 
 const IDLE_MS = 30000;
 const JOURNEY_CYCLE_MS = 8000;
-const BUILD_DURATION_MS = 20000;
-const BUILD_BATCH_COUNT = 50;
+const BUILD_DURATION_MS = 10000;
+const SEQUENTIAL_FIRST = 100;
+const SEQUENTIAL_INTERVAL_MS = 10;
 
 const SORT_OPTIONS = {
   'date-desc': (a, b) => new Date(b.scoreCreatedOn) - new Date(a.scoreCreatedOn),
@@ -103,7 +105,6 @@ async function init() {
   let playbackRafId = null;
   let playbackStartTime = 0;
   let playbackList = [];
-  let playbackLastBatch = -1;
 
   function onUserActivity() {
     if (isExploring) stopExploration();
@@ -165,7 +166,7 @@ async function init() {
     }));
     lastArcsData = arcs;
     globe.arcsData(arcs);
-    globe.pointsData([]);
+    globe.objectsData([]);
     journeyListEl.parentElement?.classList.add('playback-building');
     resultCountEl.textContent = `Building: 0 of ${arcs.length}`;
     playBtn.classList.add('playing');
@@ -178,22 +179,26 @@ async function init() {
   function tickPlayback() {
     if (!isPlayback || playbackList.length === 0) return;
     const elapsed = performance.now() - playbackStartTime;
-    const rawT = Math.min(1, elapsed / BUILD_DURATION_MS);
-    const easedT = easeInOutCubic(rawT);
     const total = lastArcsData.length;
-    const targetReveal = Math.floor(easedT * total);
-    const batchSize = Math.max(1, Math.ceil(total / BUILD_BATCH_COUNT));
-    const currentBatch = Math.floor(targetReveal / batchSize);
-    if (currentBatch > playbackLastBatch || rawT >= 1) {
-      playbackLastBatch = currentBatch;
-      const revealUpTo = rawT >= 1 ? total : Math.min(total, (currentBatch + 1) * batchSize);
-      for (let i = 0; i < total; i++) lastArcsData[i].__revealed = i < revealUpTo;
-      globe.arcsData(lastArcsData);
+    let targetReveal;
+    const sequentialDuration = SEQUENTIAL_FIRST * SEQUENTIAL_INTERVAL_MS;
+    if (elapsed < sequentialDuration) {
+      targetReveal = Math.min(total, Math.floor(elapsed / SEQUENTIAL_INTERVAL_MS));
+    } else {
+      const remainingCount = Math.max(0, total - SEQUENTIAL_FIRST);
+      const batchDuration = BUILD_DURATION_MS - sequentialDuration;
+      const batchElapsed = elapsed - sequentialDuration;
+      const rawBatchT = Math.min(1, batchElapsed / batchDuration);
+      const easedBatchT = easeInOutCubic(rawBatchT);
+      targetReveal = Math.min(total, SEQUENTIAL_FIRST + Math.floor(easedBatchT * remainingCount));
     }
+    for (let i = 0; i < total; i++) lastArcsData[i].__revealed = i < targetReveal;
+    const sorted = [...lastArcsData].sort((a, b) => (a.__revealed ? 1 : 0) - (b.__revealed ? 1 : 0));
+    globe.arcsData(sorted);
     const count = Math.min(targetReveal, total);
     infoSummaryEl.textContent = `${count} of ${total} journeys · Building...`;
     resultCountEl.textContent = `Building: ${count} of ${total}`;
-    if (rawT >= 1) {
+    if (elapsed >= BUILD_DURATION_MS || targetReveal >= total) {
       stopPlayback();
       return;
     }
@@ -202,7 +207,6 @@ async function init() {
 
   function stopPlayback() {
     isPlayback = false;
-    playbackLastBatch = -1;
     if (playbackRafId) {
       cancelAnimationFrame(playbackRafId);
       playbackRafId = null;
@@ -253,7 +257,7 @@ async function init() {
       emptyStateEl.classList.remove('hidden');
       emptySearchTermEl.textContent = searchEl.value.trim();
       globe.arcsData([]);
-      globe.pointsData([]);
+      globe.objectsData([]);
       infoSummaryEl.classList.remove('hidden');
       infoDetailEl.classList.add('hidden');
       infoSummaryEl.textContent = 'No journeys match your search';
@@ -280,11 +284,12 @@ async function init() {
 
     lastArcsData = arcsData;
     globe.arcsData(arcsData);
+    requestAnimationFrame(() => setArcsAboveMarkers(globe));
 
     const selectedJourneys = hasSelection
       ? [...selectedIndices].map((i) => filteredJourneys[i]).filter(Boolean)
       : [];
-    globe.pointsData(journeysToPoints(selectedJourneys));
+    globe.objectsData(journeysToPoints(selectedJourneys));
 
     if (hasSelection && selectedJourneys.length > 0) {
       infoSummaryEl.classList.add('hidden');
